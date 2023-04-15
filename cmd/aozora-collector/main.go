@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -13,11 +14,15 @@ import (
 	"regexp"
 	"strings"
 
+	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/PuerkitoBio/goquery"
+	"github.com/ikawaha/kagome-dict/ipa"
+	"github.com/ikawaha/kagome/v2/tokenizer"
 	"golang.org/x/text/encoding/japanese"
 )
 
-type Entity struct {
+type Entry struct {
 	AuthorID string
 	Author   string
 	TitleID  string
@@ -26,7 +31,7 @@ type Entity struct {
 	ZipURL   string
 }
 
-func findEntries(siteURL string) ([]Entity, error) {
+func findEntries(siteURL string) ([]Entry, error) {
 	res, err := http.Get(siteURL)
 	if err != nil {
 		return nil, err
@@ -44,7 +49,7 @@ func findEntries(siteURL string) ([]Entity, error) {
 
 	pat := regexp.MustCompile(`.*/cards/([0-9]+)/card([0-9]+).html$`)
 
-	entries := []Entity{}
+	entries := []Entry{}
 	doc.Find("ol li a").Each(func(n int, elem *goquery.Selection) {
 		token := pat.FindStringSubmatch(elem.AttrOr("href", ""))
 		if len(token) != 3 {
@@ -56,7 +61,7 @@ func findEntries(siteURL string) ([]Entity, error) {
 		author, zipURL := findAuthorAndZipURL(pageURL)
 
 		if zipURL != "" {
-			entries = append(entries, Entity{
+			entries = append(entries, Entry{
 				AuthorID: token[1],
 				Author:   author,
 				TitleID:  token[2],
@@ -157,22 +162,91 @@ func extractText(zipURL string) (string, error) {
 	return "", errors.New("contents not found")
 }
 
-func main() {
-	// 坂口安吾の作品一覧
-	litsURL := "https://www.aozora.gr.jp/index_pages/person1095.html"
+func setupDB(dsn string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		return nil, err
+	}
 
-	entries, err := findEntries(litsURL)
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS authors (author_id TEXT, author TEXT, PRIMARY KEY (author_id))`,
+		`CREATE TABLE IF NOT EXISTS contents (author_id TEXT, title_id TEXT, title TEXT, content TEXT, PRIMARY KEY (author_id, title))`,
+		`CREATE VIRTUAL TABLE IF NOT EXISTS contents_fts USING fts4(words)`,
+	}
+	for _, query := range queries {
+		_, err := db.Exec(query)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	return db, nil
+}
+
+func addEntry(db *sql.DB, entry *Entry, content string) error {
+	_, err := db.Exec(
+		`REPLACE INTO authors (author_id, author) VALUES (?, ?)`,
+		entry.AuthorID,
+		entry.Author,
+	)
+	if err != nil {
+		return err
+	}
+
+	res, err := db.Exec(
+		`REPLACE INTO contents (author_id, title_id, title, content) VALUES (?, ?, ?, ?)`,
+		entry.AuthorID,
+		entry.TitleID,
+		entry.Title,
+		content,
+	)
+	if err != nil {
+		return err
+	}
+
+	docID, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+
+	t, err := tokenizer.New(ipa.Dict(), tokenizer.OmitBosEos())
 	if err != nil {
 		log.Fatal(err)
 	}
+	seg := t.Wakati(content)
+	_, err = db.Exec(`INSERT INTO contents_fts (docid, words) VALUES (?, ?)`, docID, strings.Join(seg, " "))
+	if err != nil {
+		log.Fatal(err)
+	}
+	return nil
+}
+
+func main() {
+	db, err := setupDB("auzora.sqlite3")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	listURL := "https://www.aozora.gr.jp/index_pages/person1095.html"
+
+	entries, err := findEntries(listURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("found %d entries", len(entries))
 
 	for _, entry := range entries {
+		log.Printf("adding %+v\n", entry)
 		content, err := extractText(entry.ZipURL)
 		if err != nil {
-			log.Println(err)
+			log.Fatal(err)
 			continue
 		}
-		fmt.Println(entry.PageURL)
-		fmt.Println(content)
+
+		err = addEntry(db, &entry, content)
+		if err != nil {
+			log.Fatal(err)
+			continue
+		}
 	}
 }
