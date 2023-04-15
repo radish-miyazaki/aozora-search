@@ -22,6 +22,8 @@ import (
 	"golang.org/x/text/encoding/japanese"
 )
 
+var pageURLFormat = "https://www.aozora.gr.jp/cards/%s/card%s.html"
+
 type Entry struct {
 	AuthorID string
 	Author   string
@@ -57,7 +59,7 @@ func findEntries(siteURL string) ([]Entry, error) {
 		}
 
 		title := elem.Text()
-		pageURL := fmt.Sprintf("https://www.aozora.gr.jp/cards/%s/card%s.html", token[1], token[2])
+		pageURL := fmt.Sprintf(pageURLFormat, token[1], token[2])
 		author, zipURL := findAuthorAndZipURL(pageURL)
 
 		if zipURL != "" {
