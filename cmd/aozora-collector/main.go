@@ -227,6 +227,7 @@ func main() {
 	}
 	defer db.Close()
 
+	// 坂口安吾の作品一覧ページ
 	listURL := "https://www.aozora.gr.jp/index_pages/person1095.html"
 
 	entries, err := findEntries(listURL)
