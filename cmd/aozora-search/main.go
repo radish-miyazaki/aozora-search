@@ -8,9 +8,10 @@ import (
 	"os"
 	"strings"
 
+	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/ikawaha/kagome-dict/ipa"
 	"github.com/ikawaha/kagome/v2/tokenizer"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 func showAuthors(db *sql.DB) error {
