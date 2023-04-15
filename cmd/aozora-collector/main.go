@@ -221,7 +221,7 @@ func addEntry(db *sql.DB, entry *Entry, content string) error {
 }
 
 func main() {
-	db, err := setupDB("auzora.sqlite3")
+	db, err := setupDB("aozora.sqlite")
 	if err != nil {
 		log.Fatal(err)
 	}
